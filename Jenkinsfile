@@ -177,16 +177,17 @@ pipeline {
                         gke-gcloud-auth-plugin --version
                     '''
 
-                    // Jenkins agents are ephemeral (no stable egress IP), so the
-                    // control plane can't be reached via IP-based authorized
-                    // networks. The cluster enables Google Cloud Access
-                    // (gcpPublicCidrsAccessEnabled), so any Google-owned public IP
-                    // (which the agents egress through) can reach the public
-                    // endpoint; actions are still gated by this SA's IAM/RBAC.
+                    // Use the cluster's DNS-based control-plane endpoint. Jenkins
+                    // agents are ephemeral (no stable egress IP), so IP-based
+                    // authorized networks can't reliably allowlist them and the
+                    // public IP endpoint times out. The DNS endpoint is authorized
+                    // by IAM (this SA has roles/container.developer) and is
+                    // reachable from within Google Cloud.
                     sh """
                         gcloud container clusters get-credentials ${CLUSTER_NAME} \
                             --zone ${CLUSTER_ZONE} \
-                            --project ${GOOGLE_PROJECT_ID}
+                            --project ${GOOGLE_PROJECT_ID} \
+                            --dns-endpoint
                         kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
                     """
 
