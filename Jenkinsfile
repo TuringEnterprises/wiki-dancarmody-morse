@@ -177,18 +177,26 @@ pipeline {
                         gke-gcloud-auth-plugin --version
                     '''
 
-                    // Use the cluster's DNS-based control-plane endpoint. Jenkins
-                    // agents are ephemeral (no stable egress IP), so IP-based
-                    // authorized networks can't reliably allowlist them and the
-                    // public IP endpoint times out. The DNS endpoint is authorized
-                    // by IAM (this SA has roles/container.developer) and is
-                    // reachable from within Google Cloud.
+                    // Reach the control plane via the public IP endpoint. The
+                    // cluster enables Google Cloud Access (gcpPublicCidrsAccessEnabled),
+                    // so Google-owned agent egress IPs can reach it, gated by this
+                    // SA's IAM/RBAC. (The DNS endpoint is unavailable here because
+                    // the cluster has allowExternalTraffic disabled.) Retry the
+                    // credential fetch + first kubectl call to ride out the
+                    // occasional control-plane reachability blip on a cold agent.
                     sh """
-                        gcloud container clusters get-credentials ${CLUSTER_NAME} \
-                            --zone ${CLUSTER_ZONE} \
-                            --project ${GOOGLE_PROJECT_ID} \
-                            --dns-endpoint
-                        kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+                        ok=0
+                        for attempt in 1 2 3 4 5; do
+                            if gcloud container clusters get-credentials ${CLUSTER_NAME} \
+                                    --zone ${CLUSTER_ZONE} \
+                                    --project ${GOOGLE_PROJECT_ID} \
+                               && kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -; then
+                                ok=1; break
+                            fi
+                            echo "control-plane not reachable yet (attempt \$attempt/5), retrying in 15s..."
+                            sleep 15
+                        done
+                        [ "\$ok" = "1" ] || { echo "control plane unreachable after 5 attempts"; exit 1; }
                     """
 
                     sh """
