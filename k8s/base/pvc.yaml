@@ -1,0 +1,14 @@
+# Persistent storage for Outline's local file storage (uploads, avatars,
+# document attachments). FILE_STORAGE=local writes here; because this is a
+# ReadWriteOnce volume the Outline Deployment runs a single replica.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: stem-wiki-data
+  labels:
+    app: stem-wiki
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi

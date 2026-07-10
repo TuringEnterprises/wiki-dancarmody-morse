@@ -1,0 +1,18 @@
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: stem-wiki
+spec:
+  # The Gateway load-balancer health check hits /_health, which returns 200
+  # "OK" without authentication. Anything auth-gated would redirect (3xx) and
+  # be flagged unhealthy.
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck:
+        requestPath: /_health
+        port: 3000
+  targetRef:
+    group: ""
+    kind: Service
+    name: stem-wiki

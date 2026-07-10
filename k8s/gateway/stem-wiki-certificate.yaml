@@ -1,0 +1,20 @@
+# TLS cert for stem-wiki. Lives in the gateway namespace because GKE Gateway
+# listeners can only reference certificateRefs in their own namespace.
+# cert-manager solves the ACME DNS-01 challenge via Cloudflare and writes the
+# resulting cert into the `stem-wiki-tls` secret consumed by the Gateway
+# listener.
+#
+# The `letsencrypt-cloudflare` ClusterIssuer and the `gateway-infra` namespace
+# are cluster-scoped shared infra owned by the devops-terraform repo.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: stem-wiki-tls
+  namespace: gateway-infra
+spec:
+  secretName: stem-wiki-tls
+  dnsNames:
+    - stem-wiki.turing.com
+  issuerRef:
+    name: letsencrypt-cloudflare
+    kind: ClusterIssuer

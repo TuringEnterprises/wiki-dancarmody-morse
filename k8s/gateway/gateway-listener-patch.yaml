@@ -1,0 +1,35 @@
+# stem-wiki's HTTPS listener on the shared external Gateway.
+#
+# The Gateway itself (shared-external-gateway in gateway-infra) is cluster-wide
+# infra owned by the devops-terraform repo and ships with only the generic
+# HTTP :80 listener. This file adds ONLY stem-wiki's listener.
+#
+# Attach it with server-side apply so it merges into the listeners map by name
+# without touching the shared http listener or other apps' listeners:
+#
+#   kubectl apply --server-side --field-manager=stem-wiki \
+#     -f k8s/gateway/gateway-listener-patch.yaml
+#
+# Do NOT use `kubectl patch --type merge` here — a JSON merge patch replaces
+# the whole `listeners` array and would drop every other app's listener.
+#
+# This is a one-time (per cluster) bootstrap step, not part of the per-deploy
+# overlay that CI applies.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: shared-external-gateway
+  namespace: gateway-infra
+spec:
+  listeners:
+    - name: https-stem-wiki
+      protocol: HTTPS
+      port: 443
+      hostname: stem-wiki.turing.com
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: stem-wiki-tls
+      allowedRoutes:
+        namespaces:
+          from: All

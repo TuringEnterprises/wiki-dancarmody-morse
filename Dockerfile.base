@@ -9,7 +9,8 @@ COPY ./patches ./patches
 RUN apt-get update && apt-get install -y cmake
 ENV NODE_OPTIONS="--max-old-space-size=24000"
 
-RUN corepack enable
+# Node >= 25 no longer bundles corepack, so install it before enabling.
+RUN npm install -g corepack@latest && corepack enable
 RUN yarn install --immutable --network-timeout 1000000 && \
   yarn cache clean
 

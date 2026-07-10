@@ -1,0 +1,94 @@
+# In-cluster PostgreSQL for Outline. Self-contained (no Cloud SQL): a single
+# StatefulSet backed by a PersistentVolumeClaim on the cluster's default
+# (balanced PD) StorageClass. Credentials come from the stem-wiki-secrets
+# Secret (see k8s/README-less note in Jenkinsfile / bootstrap commands).
+apiVersion: v1
+kind: Service
+metadata:
+  name: stem-wiki-postgres
+  labels:
+    app: stem-wiki
+    component: postgres
+spec:
+  # Headless service — stable DNS for the single StatefulSet pod.
+  clusterIP: None
+  selector:
+    app: stem-wiki
+    component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: stem-wiki-postgres
+  labels:
+    app: stem-wiki
+    component: postgres
+spec:
+  serviceName: stem-wiki-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stem-wiki
+      component: postgres
+  template:
+    metadata:
+      labels:
+        app: stem-wiki
+        component: postgres
+    spec:
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: stem-wiki-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stem-wiki-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: "outline"
+            # Keep the data dir in a subdirectory so lost+found on the PV root
+            # does not break initdb.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d outline"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d outline"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

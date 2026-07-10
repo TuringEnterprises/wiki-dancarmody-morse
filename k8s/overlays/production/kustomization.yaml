@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: stem-wiki
+
+resources:
+- ../../base
+
+# Image tag is pinned by the Jenkins job at deploy time via:
+#   kustomize edit set image stem-wiki=<repo>:<TAG>
+images:
+- name: stem-wiki
+  newName: us-central1-docker.pkg.dev/turing-general-projects/stem-wiki/app
+  newTag: manual-032379da9

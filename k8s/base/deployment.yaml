@@ -1,0 +1,138 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stem-wiki
+  labels:
+    app: stem-wiki
+    component: web
+spec:
+  # Single replica: Outline uses FILE_STORAGE=local on a ReadWriteOnce PVC,
+  # which cannot be shared across pods on different nodes. Switch to S3/GCS
+  # file storage to scale out horizontally.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: stem-wiki
+      component: web
+  template:
+    metadata:
+      labels:
+        app: stem-wiki
+        component: web
+    spec:
+      securityContext:
+        # Outline's runner image uses uid/gid 1001 (nodejs); make the mounted
+        # data volume group-writable by it.
+        fsGroup: 1001
+      # Wait for Postgres to accept connections before starting Outline so the
+      # auto-migration on boot doesn't fail with ECONNREFUSED.
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h stem-wiki-postgres -p 5432 -U "$PGUSER"; do
+                echo "waiting for postgres..."; sleep 3;
+              done
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: stem-wiki-secrets
+                  key: POSTGRES_USER
+      containers:
+        - name: stem-wiki
+          image: stem-wiki:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: URL
+              value: "https://stem-wiki.turing.com"
+            - name: FORCE_HTTPS
+              value: "true"
+            - name: WEB_CONCURRENCY
+              value: "1"
+            - name: FILE_STORAGE
+              value: "local"
+            - name: FILE_STORAGE_LOCAL_ROOT_DIR
+              value: "/var/lib/outline/data"
+            # In-cluster Postgres has no TLS.
+            - name: PGSSLMODE
+              value: "disable"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: stem-wiki-secrets
+                  key: SECRET_KEY
+            - name: UTILS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: stem-wiki-secrets
+                  key: UTILS_SECRET
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: stem-wiki-secrets
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: stem-wiki-secrets
+                  key: REDIS_URL
+            # Auth providers — optional so the app can start before OAuth
+            # credentials are populated. Add at least one to enable sign-in.
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: stem-wiki-secrets
+                  key: GOOGLE_CLIENT_ID
+                  optional: true
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: stem-wiki-secrets
+                  key: GOOGLE_CLIENT_SECRET
+                  optional: true
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1536Mi"
+          # /_health returns 200 "OK" without auth — safe for GCP LB health
+          # checks (which flag 3xx as unhealthy) and kubelet probes alike.
+          startupProbe:
+            httpGet:
+              path: /_health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 40
+          readinessProbe:
+            httpGet:
+              path: /_health
+              port: 3000
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /_health
+              port: 3000
+            periodSeconds: 15
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/outline/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: stem-wiki-data

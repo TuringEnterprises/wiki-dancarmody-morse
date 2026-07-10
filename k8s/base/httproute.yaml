@@ -1,0 +1,40 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: stem-wiki
+spec:
+  # Attaches to the shared external Gateway in the gateway-infra namespace.
+  # Cross-namespace attachment is permitted because that Gateway's listeners
+  # allow routes `from: All`.
+  parentRefs:
+    - name: shared-external-gateway
+      namespace: gateway-infra
+      sectionName: https-stem-wiki
+  hostnames:
+    - stem-wiki.turing.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: stem-wiki
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: stem-wiki-https-redirect
+spec:
+  parentRefs:
+    - name: shared-external-gateway
+      namespace: gateway-infra
+      sectionName: http
+  hostnames:
+    - stem-wiki.turing.com
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
