@@ -177,26 +177,30 @@ pipeline {
                         gke-gcloud-auth-plugin --version
                     '''
 
-                    // Reach the control plane via the public IP endpoint. The
-                    // cluster enables Google Cloud Access (gcpPublicCidrsAccessEnabled),
-                    // so Google-owned agent egress IPs can reach it, gated by this
-                    // SA's IAM/RBAC. (The DNS endpoint is unavailable here because
-                    // the cluster has allowExternalTraffic disabled.) Retry the
-                    // credential fetch + first kubectl call to ride out the
-                    // occasional control-plane reachability blip on a cold agent.
+                    // The ephemeral agents can't reach the IP control-plane
+                    // endpoint (their egress isn't in the cluster's authorized
+                    // networks, so it times out). Retarget kubeconfig at the
+                    // cluster's DNS-based endpoint instead: it's fronted by
+                    // Google's global endpoint (publicly-trusted cert, reachable
+                    // from within Google Cloud) and gated by this SA's IAM/RBAC.
+                    // `get-credentials --dns-endpoint` is refused while the
+                    // cluster has allowExternalTraffic disabled, so rewrite the
+                    // kubeconfig cluster entry by hand (system CAs validate the
+                    // gke.goog cert, so drop the API-server CA data).
                     sh """
-                        ok=0
-                        for attempt in 1 2 3 4 5; do
-                            if gcloud container clusters get-credentials ${CLUSTER_NAME} \
-                                    --zone ${CLUSTER_ZONE} \
-                                    --project ${GOOGLE_PROJECT_ID} \
-                               && kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -; then
-                                ok=1; break
-                            fi
-                            echo "control-plane not reachable yet (attempt \$attempt/5), retrying in 15s..."
-                            sleep 15
-                        done
-                        [ "\$ok" = "1" ] || { echo "control plane unreachable after 5 attempts"; exit 1; }
+                        gcloud container clusters get-credentials ${CLUSTER_NAME} \
+                            --zone ${CLUSTER_ZONE} \
+                            --project ${GOOGLE_PROJECT_ID}
+
+                        DNS_EP=\$(gcloud container clusters describe ${CLUSTER_NAME} \
+                            --zone ${CLUSTER_ZONE} --project ${GOOGLE_PROJECT_ID} \
+                            --format='value(controlPlaneEndpointsConfig.dnsEndpointConfig.endpoint)')
+                        CTX_CLUSTER="gke_${GOOGLE_PROJECT_ID}_${CLUSTER_ZONE}_${CLUSTER_NAME}"
+                        echo "Retargeting kubeconfig to DNS endpoint: \$DNS_EP"
+                        kubectl config set-cluster "\$CTX_CLUSTER" --server="https://\$DNS_EP"
+                        kubectl config unset "clusters.\$CTX_CLUSTER.certificate-authority-data" || true
+
+                        kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
                     """
 
                     sh """
